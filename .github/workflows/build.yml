@@ -38,3 +38,4 @@ jobs:
           name: ${{ matrix.name }}-windows-x64
           path: dist/${{ matrix.name }}
           if-no-files-found: error
+
