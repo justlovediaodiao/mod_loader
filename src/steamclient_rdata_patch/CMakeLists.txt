@@ -31,6 +31,6 @@ target_include_directories(steamclient_rdata_patch PRIVATE
   ${minhook_source_SOURCE_DIR}/src
   ${minhook_source_SOURCE_DIR}/src/hde
 )
-target_link_libraries(steamclient_rdata_patch PRIVATE kernel32)
+target_link_libraries(steamclient_rdata_patch PRIVATE kernel32 advapi32)
 
 install(TARGETS steamclient_rdata_patch RUNTIME DESTINATION .)

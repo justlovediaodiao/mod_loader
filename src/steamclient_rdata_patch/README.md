@@ -1,17 +1,18 @@
 # steamclient_rdata_patch
 
-A standalone Windows x64 mod loaded by `mod_loader`. During mod initialization,
-it synchronously installs a `LoadLibraryExW` detour. When the original function
-successfully loads `steamclient64.dll`, the mod walks every mapped region in the
-loaded image's `.rdata` section and changes read-only regions to
-`PAGE_READWRITE` for private memory or `PAGE_WRITECOPY` for mapped/image memory
-in the current process before returning the module handle.
+A standalone Windows x64 mod loaded by `mod_loader`. It reads the installed
+Steam client path from:
 
-The requested path is never changed. The Steam installation remains untouched,
-and no local copy of `steamclient64.dll` is required.
+```text
+HKCU\Software\Valve\Steam\ActiveProcess\SteamClientDll64
+```
 
-The detour uses the pinned `MinHook v1.3.4`
-release, which CMake fetches during the GitHub Actions build.
+It then installs a `LoadLibraryExW` detour. Requests for
+`steamclient64.dll` are redirected to `steamclient64_patched.dll` in that same
+Steam installation directory. No file in the game directory is used.
+
+The detour uses the pinned `MinHook v1.3.4` release, which CMake fetches during
+the GitHub Actions build.
 
 ## Build
 
@@ -21,28 +22,33 @@ cmake --build build --config Release
 cmake --install build --config Release --prefix out
 ```
 
-You can also run the repository's GitHub Actions workflow. Its artifact is named
+The GitHub Actions artifact is named
 `steamclient_rdata_patch-windows-x64`.
 
 ## Install
 
-Install `mod_loader` first, then arrange the files as follows:
+Keep the original Steam file unchanged and put the writable-section copy beside
+it under a different name:
 
 ```text
-<game executable directory>/
-  mods/
+C:\Program Files (x86)\Steam\
+  steamclient64.dll
+  steamclient64_patched.dll
+```
+
+Install the mod as:
+
+```text
+<game executable directory>\
+  mods\
     steamclient_rdata_patch.dll
 ```
 
-Remove the old local `steamclient64.dll` from the game executable directory so
-that Steam can load its original absolute path. After a successful installation,
-`mod.log` should contain:
+There must not be a `steamclient64.dll` in the game executable directory.
+
+Expected `mod.log` messages:
 
 ```text
-steamclient_rdata_patch: installed LoadLibraryExW post-load patch
-steamclient_rdata_patch: made steamclient64.dll .rdata copy-on-write in this process
+steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect
+steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll
 ```
-
-The hook calls the original loader first and does not use a polling thread. The
-caller cannot continue past `LoadLibraryExW` until the in-process protection
-change has completed.
