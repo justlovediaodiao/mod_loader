@@ -2,9 +2,10 @@
 
 A standalone Windows x64 mod loaded by `mod_loader`. During mod initialization,
 it synchronously installs a `LoadLibraryExW` detour. When the original function
-successfully loads `steamclient64.dll`, the mod changes the loaded image's
-`.rdata` section to `PAGE_READWRITE` in the current process before returning the
-module handle to the caller.
+successfully loads `steamclient64.dll`, the mod walks every mapped region in the
+loaded image's `.rdata` section and changes read-only regions to
+`PAGE_READWRITE` for private memory or `PAGE_WRITECOPY` for mapped/image memory
+in the current process before returning the module handle.
 
 The requested path is never changed. The Steam installation remains untouched,
 and no local copy of `steamclient64.dll` is required.
@@ -39,7 +40,7 @@ that Steam can load its original absolute path. After a successful installation,
 
 ```text
 steamclient_rdata_patch: installed LoadLibraryExW post-load patch
-steamclient_rdata_patch: made steamclient64.dll .rdata writable in this process
+steamclient_rdata_patch: made steamclient64.dll .rdata copy-on-write in this process
 ```
 
 The hook calls the original loader first and does not use a polling thread. The

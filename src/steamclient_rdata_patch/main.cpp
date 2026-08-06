@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 #include <wchar.h>
 
@@ -34,6 +35,63 @@ static const wchar_t* filename_part(const wchar_t* path) {
     return filename;
 }
 
+static bool protection_is_writable(DWORD protection) {
+    protection &= 0xff;
+    return protection == PAGE_READWRITE ||
+           protection == PAGE_WRITECOPY ||
+           protection == PAGE_EXECUTE_READWRITE ||
+           protection == PAGE_EXECUTE_WRITECOPY;
+}
+
+static bool protect_rdata_regions(
+    unsigned char* section_start, SIZE_T section_size, DWORD* error) {
+    uintptr_t cursor = reinterpret_cast<uintptr_t>(section_start);
+    const uintptr_t end = cursor + section_size;
+    if (end < cursor) return false;
+
+    while (cursor < end) {
+        MEMORY_BASIC_INFORMATION memory{};
+        if (!VirtualQuery(reinterpret_cast<void*>(cursor), &memory,
+                          sizeof(memory))) {
+            if (error) *error = GetLastError();
+            return false;
+        }
+
+        const uintptr_t region_base =
+            reinterpret_cast<uintptr_t>(memory.BaseAddress);
+        const uintptr_t region_end = region_base + memory.RegionSize;
+        if (region_end <= cursor) {
+            if (error) *error = ERROR_INVALID_ADDRESS;
+            return false;
+        }
+
+        const uintptr_t chunk_end = region_end < end ? region_end : end;
+        const SIZE_T chunk_size = chunk_end - cursor;
+        if (memory.State != MEM_COMMIT) {
+            if (error) *error = ERROR_INVALID_ADDRESS;
+            return false;
+        }
+
+        if (!protection_is_writable(memory.Protect)) {
+            DWORD old_protection = 0;
+            // steamclient64.dll uses separate read-only mapped views for parts
+            // of .rdata. Copy-on-write is compatible with those views and keeps
+            // the Steam file and other processes unchanged.
+            const DWORD writable_protection =
+                memory.Type == MEM_PRIVATE ? PAGE_READWRITE : PAGE_WRITECOPY;
+            if (!VirtualProtect(reinterpret_cast<void*>(cursor), chunk_size,
+                                writable_protection, &old_protection)) {
+                if (error) *error = GetLastError();
+                return false;
+            }
+        }
+        cursor = chunk_end;
+    }
+
+    if (error) *error = ERROR_SUCCESS;
+    return true;
+}
+
 static bool make_rdata_writable(HMODULE module, DWORD* error) {
     if (error) *error = ERROR_BAD_EXE_FORMAT;
     if (!module) return false;
@@ -61,14 +119,8 @@ static bool make_rdata_writable(HMODULE module, DWORD* error) {
         if (!size) size = section->SizeOfRawData;
         if (!size) return false;
 
-        DWORD old_protection = 0;
-        if (!VirtualProtect(base + section->VirtualAddress, size,
-                            PAGE_READWRITE, &old_protection)) {
-            if (error) *error = GetLastError();
-            return false;
-        }
-        if (error) *error = ERROR_SUCCESS;
-        return true;
+        return protect_rdata_regions(
+            base + section->VirtualAddress, size, error);
     }
 
     return false;
@@ -78,7 +130,7 @@ static void patch_and_log(HMODULE module) {
     DWORD error = ERROR_SUCCESS;
     if (make_rdata_writable(module, &error)) {
         if (InterlockedCompareExchange(&g_patch_logged, 1, 0) == 0)
-            log_message(L"steamclient_rdata_patch: made steamclient64.dll .rdata writable in this process");
+            log_message(L"steamclient_rdata_patch: made steamclient64.dll .rdata copy-on-write in this process");
         return;
     }
 
@@ -95,7 +147,12 @@ static HMODULE WINAPI hooked_load_library_ex_w(
     LPCWSTR file_name, HANDLE file, DWORD flags) {
     HMODULE module = g_original_load_library_ex_w(file_name, file, flags);
     const wchar_t* filename = filename_part(file_name);
+    constexpr DWORD non_executable_mapping_flags =
+        LOAD_LIBRARY_AS_DATAFILE |
+        LOAD_LIBRARY_AS_DATAFILE_EXCLUSIVE |
+        LOAD_LIBRARY_AS_IMAGE_RESOURCE;
     if (module && filename &&
+        !(flags & non_executable_mapping_flags) &&
         lstrcmpiW(filename, L"steamclient64.dll") == 0)
         patch_and_log(module);
     return module;
