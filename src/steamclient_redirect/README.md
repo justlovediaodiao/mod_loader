@@ -1,8 +1,12 @@
 # steamclient_redirect
 
-A standalone Windows x64 mod loaded through `mod_loader`. It modifies only the `LoadLibraryExW` entry in the import table of `steam_api64.dll`: when the function is asked to load `steamclient64.dll`, it loads a local copy from the same directory as the game executable instead.
+A standalone Windows x64 mod loaded by `mod_loader`. During mod initialization,
+it synchronously installs a `LoadLibraryExW` detour. When that function is
+asked to load `steamclient64.dll`, the request is redirected to the local copy
+beside the game executable.
 
-It does not modify `steamclient64.dll`, alter any virtual tables, or hook other modules or DLL-loading APIs.
+The detour uses the pinned `MinHook v1.3.4`
+release, which CMake fetches during the GitHub Actions build.
 
 ## Build
 
@@ -12,12 +16,12 @@ cmake --build build --config Release
 cmake --install build --config Release --prefix out
 ```
 
-Alternatively, run the repository’s GitHub Actions workflow. The artifact is named
+You can also run the repository's GitHub Actions workflow. Its artifact is named
 `steamclient_redirect-windows-x64`.
 
 ## Install
 
-Install `mod_loader` first, then place the files in the following structure:
+Install `mod_loader` first, then arrange the files as follows:
 
 ```text
 <game executable directory>/
@@ -26,11 +30,15 @@ Install `mod_loader` first, then place the files in the following structure:
     steamclient_redirect.dll
 ```
 
-`steamclient64.dll` is the local copy that should be loaded with priority. After a successful installation, `mod.log` should contain:
+`steamclient64.dll` is the local copy that should take precedence. After a
+successful installation, `mod.log` should contain:
 
 ```text
-steamclient_redirect: installed LoadLibraryExW IAT redirect
+steamclient_redirect: installed LoadLibraryExW detour
 steamclient_redirect: redirecting steamclient64.dll to the local copy
 ```
 
-If the log reports `steamclient64.dll was already loaded`, the mod was loaded too late, and the existing module can no longer be replaced through load redirection for the current process.
+The detour installation message should appear immediately after
+`Loading mod: steamclient_redirect.dll`; it no longer waits for
+`steam_api64.dll`. If `steamclient64.dll was already loaded` is reported at
+this point, even `mod_loader`'s own mod initialization occurred too late.
