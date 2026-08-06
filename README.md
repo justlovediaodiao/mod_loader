@@ -4,8 +4,8 @@ This repository contains three components that can be built and released indepen
 
 - [`src/mod_loader`](src/mod_loader): a generic Windows mod loader and its mod ABI.
 - [`src/unity_fps_limit`](src/unity_fps_limit): a Unity FPS/VSync mod using that ABI.
-- [`src/steamclient_redirect`](src/steamclient_redirect): a targeted
-  `steam_api64.dll` IAT redirect for a local `steamclient64.dll`.
+- [`src/steamclient_rdata_patch`](src/steamclient_rdata_patch): a targeted
+  post-load `.rdata` protection patch for `steamclient64.dll`.
 
 The components intentionally keep separate CMake projects and release
 packages. GitHub Actions builds them independently on Windows x64 and uploads
