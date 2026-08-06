@@ -27,7 +27,8 @@ static bool build_local_steamclient_path() {
 
     constexpr wchar_t filename[] = L"steamclient64.dll";
     const size_t directory_length = static_cast<size_t>(slash - g_local_steamclient + 1);
-    if (directory_length + _countof(filename) > MAX_PATH) return false;
+    constexpr size_t filename_length = sizeof(filename) / sizeof(filename[0]);
+    if (directory_length + filename_length > MAX_PATH) return false;
 
     slash[1] = L'\0';
     lstrcatW(g_local_steamclient, filename);

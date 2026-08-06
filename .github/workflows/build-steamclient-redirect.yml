@@ -1,0 +1,30 @@
+name: Build steamclient_redirect
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S src/steamclient_redirect -B build/steamclient_redirect -A x64
+
+      - name: Build
+        run: cmake --build build/steamclient_redirect --config Release --parallel
+
+      - name: Install distributable files
+        run: cmake --install build/steamclient_redirect --config Release --prefix dist/steamclient_redirect
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steamclient_redirect-windows-x64
+          path: dist/steamclient_redirect
+          if-no-files-found: error
