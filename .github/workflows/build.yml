@@ -18,6 +18,8 @@ jobs:
             source: src/mod_loader
           - name: unity_fps_limit
             source: src/unity_fps_limit
+          - name: steamclient_redirect
+            source: src/steamclient_redirect
 
     steps:
       - name: Check out repository
@@ -38,4 +40,3 @@ jobs:
           name: ${{ matrix.name }}-windows-x64
           path: dist/${{ matrix.name }}
           if-no-files-found: error
-
