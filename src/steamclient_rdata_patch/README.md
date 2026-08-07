@@ -9,7 +9,9 @@ HKCU\Software\Valve\Steam\ActiveProcess\SteamClientDll64
 
 It then installs a `LoadLibraryExW` detour. Requests for
 `steamclient64.dll` are redirected to `steamclient64_patched.dll` in that same
-Steam installation directory. No file in the game directory is used.
+Steam installation directory. After the patched DLL loads, its loader entry's
+full path and base name are changed back to those of the original
+`steamclient64.dll`. No file in the game directory is used.
 
 The detour uses the pinned `MinHook v1.3.4` release, which CMake fetches during
 the GitHub Actions build.
@@ -51,4 +53,5 @@ Expected `mod.log` messages:
 ```text
 steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect
 steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll
+steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll
 ```
