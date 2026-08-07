@@ -1,7 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <intrin.h>
-#include <limits.h>
 #include <stddef.h>
 #include <string.h>
 #include <wchar.h>
@@ -60,9 +59,6 @@ static wchar_t g_original_steamclient[MAX_PATH];
 static wchar_t g_patched_steamclient[MAX_PATH];
 static HMODULE g_loaded_steamclient;
 static CRITICAL_SECTION g_redirect_lock;
-static volatile LONG g_redirect_logged;
-static volatile LONG g_rename_logged;
-static volatile LONG g_rename_error_logged;
 
 static void log_message(const wchar_t* message) {
     if (g_log) g_log(message);
@@ -85,14 +81,13 @@ static const wchar_t* filename_part(const wchar_t* path) {
 }
 
 static bool get_patched_steamclient_path() {
-    DWORD type = 0;
     DWORD size = sizeof(g_original_steamclient);
     LSTATUS status = RegGetValueW(
         HKEY_CURRENT_USER,
         L"Software\\Valve\\Steam\\ActiveProcess",
         L"SteamClientDll64",
         RRF_RT_REG_SZ,
-        &type,
+        nullptr,
         g_original_steamclient,
         &size
     );
@@ -122,16 +117,6 @@ static bool get_patched_steamclient_path() {
            !(attributes & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-static bool loader_string_can_hold(
-    const LoaderUnicodeString& destination, const wchar_t* source) {
-    if (!destination.Buffer || !source) return false;
-
-    const size_t source_chars = wcslen(source);
-    const size_t source_bytes = source_chars * sizeof(wchar_t);
-    return source_bytes <= USHRT_MAX &&
-           source_bytes + sizeof(wchar_t) <= destination.MaximumLength;
-}
-
 static void overwrite_loader_string(
     LoaderUnicodeString* destination, const wchar_t* source) {
     const size_t source_chars = wcslen(source);
@@ -141,9 +126,6 @@ static void overwrite_loader_string(
 }
 
 static bool restore_original_loader_names(HMODULE module) {
-    if (!module || !g_ldr_lock_loader_lock || !g_ldr_unlock_loader_lock)
-        return false;
-
     ULONG disposition = 0;
     ULONG_PTR cookie = 0;
     if (g_ldr_lock_loader_lock(0, &disposition, &cookie) < 0)
@@ -151,28 +133,19 @@ static bool restore_original_loader_names(HMODULE module) {
 
     bool restored = false;
     PartialPeb* peb = reinterpret_cast<PartialPeb*>(__readgsqword(0x60));
-    if (peb && peb->Ldr) {
-        LIST_ENTRY* head = &peb->Ldr->InLoadOrderModuleList;
-        for (LIST_ENTRY* link = head->Flink; link && link != head;
-             link = link->Flink) {
-            LoaderDataTableEntry* entry = CONTAINING_RECORD(
-                link, LoaderDataTableEntry, InLoadOrderLinks);
-            if (entry->DllBase != module) continue;
+    LIST_ENTRY* head = &peb->Ldr->InLoadOrderModuleList;
+    for (LIST_ENTRY* link = head->Flink; link != head; link = link->Flink) {
+        LoaderDataTableEntry* entry = CONTAINING_RECORD(
+            link, LoaderDataTableEntry, InLoadOrderLinks);
+        if (entry->DllBase != module) continue;
 
-            const wchar_t* original_name =
-                filename_part(g_original_steamclient);
-            if (loader_string_can_hold(
-                    entry->FullDllName, g_original_steamclient) &&
-                loader_string_can_hold(entry->BaseDllName, original_name)) {
-                overwrite_loader_string(
-                    &entry->FullDllName, g_original_steamclient);
-                overwrite_loader_string(&entry->BaseDllName, original_name);
-                restored = true;
-            }
-            break;
-        }
+        // Both replacement strings are shorter than the patched names whose
+        // loader buffers they reuse.
+        overwrite_loader_string(&entry->FullDllName, g_original_steamclient);
+        overwrite_loader_string(&entry->BaseDllName, L"steamclient64.dll");
+        restored = true;
+        break;
     }
-
     g_ldr_unlock_loader_lock(0, cookie);
     return restored;
 }
@@ -194,31 +167,30 @@ static HMODULE WINAPI hooked_load_library_ex_w(
         }
         g_loaded_steamclient = nullptr;
 
-        if (InterlockedCompareExchange(&g_redirect_logged, 1, 0) == 0)
-            log_message(L"steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll");
         HMODULE module = g_original_load_library_ex_w(
             g_patched_steamclient, file, flags);
+        bool names_restored = false;
         if (module) {
             g_loaded_steamclient = module;
-            if (restore_original_loader_names(module)) {
-                if (InterlockedCompareExchange(&g_rename_logged, 1, 0) == 0)
-                    log_message(L"steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll");
-            } else if (InterlockedCompareExchange(
-                           &g_rename_error_logged, 1, 0) == 0) {
-                log_message(L"steamclient_rdata_patch: failed to restore loader entry path and name");
-            }
+            names_restored = restore_original_loader_names(module);
         }
         LeaveCriticalSection(&g_redirect_lock);
+
+        log_message(L"steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll");
+        if (module && names_restored)
+            log_message(L"steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll");
+        else if (module)
+            log_message(L"steamclient_rdata_patch: failed to restore loader entry path and name");
         return module;
     }
     return g_original_load_library_ex_w(file_name, file, flags);
 }
 
-static bool install_hook() {
+static void install_hook() {
     MH_STATUS status = MH_Initialize();
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
         log_hook_error(L"MH_Initialize", status);
-        return false;
+        return;
     }
 
     void* target = nullptr;
@@ -231,18 +203,17 @@ static bool install_hook() {
     );
     if (status != MH_OK) {
         log_hook_error(L"MH_CreateHookApiEx", status);
-        return false;
+        return;
     }
 
     status = MH_EnableHook(target);
     if (status != MH_OK) {
         log_hook_error(L"MH_EnableHook", status);
         MH_RemoveHook(target);
-        return false;
+        return;
     }
 
     log_message(L"steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect");
-    return true;
 }
 
 extern "C" __declspec(dllexport)
@@ -267,6 +238,5 @@ void MOD_LOADER_CALL on_mod_load(mod_log_fn logger) {
         return;
     }
     InitializeCriticalSection(&g_redirect_lock);
-    if (!install_hook())
-        DeleteCriticalSection(&g_redirect_lock);
+    install_hook();
 }
