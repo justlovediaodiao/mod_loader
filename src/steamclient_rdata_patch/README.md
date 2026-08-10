@@ -38,20 +38,10 @@ C:\Program Files (x86)\Steam\
   steamclient64_patched.dll
 ```
 
-Install the mod as:
+Install mod loader first. Install the mod as:
 
 ```text
 <game executable directory>\
   mods\
     steamclient_rdata_patch.dll
-```
-
-There must not be a `steamclient64.dll` in the game executable directory.
-
-Expected `mod.log` messages:
-
-```text
-steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect
-steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll
-steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll
 ```
