@@ -34,7 +34,8 @@ mod loader.
 - Enumerate `<application directory>/mods/*.dll`.
 - Require the C export `on_mod_load`.
 - Pass a thread-safe `mod_log_fn` callback to each accepted mod.
-- Unload DLLs that do not implement the mod ABI.
+- Inspect each DLL's PE export table and skip files that do not implement the
+  mod ABI.
 - Write loader diagnostics to `mod.log`.
 
 ## Updating from UnityDoorstop
@@ -52,4 +53,4 @@ mod loader.
 8. Build x64 and test all supported deployment names: `version.dll`,
    `winhttp.dll`, and `dxgi.dll`.
 9. Confirm that a DLL with `on_mod_load` receives the logging callback and that
-   a DLL without the symbol is unloaded.
+   a DLL without the symbol is skipped without running `DllMain`.

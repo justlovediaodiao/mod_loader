@@ -11,10 +11,15 @@ cmake --build build --config Release
 cmake --install build --config Release --prefix out
 ```
 
-The output is `mod_loader.dll`. At deployment time, rename it to a system DLL
-imported by the target process: `version.dll`, `winhttp.dll`, or `dxgi.dll`.
+The output is `mod_loader.dll`. At deployment time, rename it to a system DLL: `version.dll`, `winhttp.dll`, or `dxgi.dll` and place it in the application directory.
 It forwards calls to the real system DLL and then enumerates `mods/*.dll` under
 the application directory.
+
+If that proxy filename is already used by another local DLL, preserve the other
+DLL under the corresponding `_alt` name. For example, when deploying the loader
+as `version.dll`, rename the displaced local DLL to `version_alt.dll`. The loader
+first tries the adjacent `<proxy-name>_alt.dll`, then falls back to the original
+`<proxy-name>.dll` in the Windows System32 directory.
 
 ## Mod ABI
 
@@ -30,8 +35,7 @@ void __cdecl on_mod_load(mod_log_fn log) {
 }
 ```
 
-A DLL without `on_mod_load` is logged and unloaded. Loader messages are written
-to `mod.log` in the application directory.
+A DLL without `on_mod_load` is skipped. Loader messages are written to `mod.log` in the application directory.
 
 ## Upstream source
 

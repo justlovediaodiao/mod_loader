@@ -62,6 +62,73 @@ static HMODULE load_proxy(HMODULE self) {
     return LoadLibraryW(path);
 }
 
+struct mapped_file {
+    HANDLE file = INVALID_HANDLE_VALUE;
+    HANDLE mapping = nullptr;
+    const uint8_t* data = nullptr;
+
+    ~mapped_file() {
+        if (data) UnmapViewOfFile(data);
+        if (mapping) CloseHandle(mapping);
+        if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+    }
+};
+
+static bool map_read_only(const wchar_t* path, mapped_file& mapped) {
+    mapped.file = CreateFileW(path, GENERIC_READ,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (mapped.file == INVALID_HANDLE_VALUE) return false;
+    mapped.mapping = CreateFileMappingW(mapped.file, nullptr,
+                                        PAGE_READONLY | SEC_IMAGE_NO_EXECUTE,
+                                        0, 0, nullptr);
+    if (!mapped.mapping) return false;
+    mapped.data = static_cast<const uint8_t*>(
+        MapViewOfFile(mapped.mapping, FILE_MAP_READ, 0, 0, 0));
+    return mapped.data != nullptr;
+}
+
+// Inspect the PE export table before loading the DLL. Loading an arbitrary DLL
+// just to call GetProcAddress would already run its process-attach initializer.
+static bool has_on_mod_load_export(const wchar_t* path) {
+    mapped_file mapped;
+    if (!map_read_only(path, mapped)) return false;
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(mapped.data);
+    if (dos->e_magic != IMAGE_DOS_SIGNATURE || dos->e_lfanew < 0) return false;
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(
+        mapped.data + dos->e_lfanew);
+    if (nt->Signature != IMAGE_NT_SIGNATURE ||
+        nt->FileHeader.Machine != IMAGE_FILE_MACHINE_AMD64 ||
+        nt->OptionalHeader.Magic != IMAGE_NT_OPTIONAL_HDR64_MAGIC ||
+        nt->OptionalHeader.NumberOfRvaAndSizes <= IMAGE_DIRECTORY_ENTRY_EXPORT) return false;
+
+    const DWORD image_size = nt->OptionalHeader.SizeOfImage;
+    const auto contains = [image_size](DWORD rva, size_t size) {
+        return rva <= image_size && size <= image_size - rva;
+    };
+    const auto& export_entry =
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (!export_entry.VirtualAddress ||
+        !contains(export_entry.VirtualAddress, sizeof(IMAGE_EXPORT_DIRECTORY))) return false;
+    const auto* exports = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(
+        mapped.data + export_entry.VirtualAddress);
+    if (!exports->AddressOfNames ||
+        !contains(exports->AddressOfNames,
+                  static_cast<size_t>(exports->NumberOfNames) * sizeof(DWORD))) return false;
+
+    const auto* names = reinterpret_cast<const DWORD*>(
+        mapped.data + exports->AddressOfNames);
+    static const char expected_name[] = "on_mod_load";
+    for (DWORD i = 0; i < exports->NumberOfNames; ++i) {
+        if (!contains(names[i], sizeof(expected_name))) continue;
+        const char* name = reinterpret_cast<const char*>(mapped.data + names[i]);
+        size_t j = 0;
+        while (j < sizeof(expected_name) && name[j] == expected_name[j]) ++j;
+        if (j == sizeof(expected_name)) return true;
+    }
+    return false;
+}
+
 static DWORD WINAPI load_mods(void*) {
     wchar_t pattern[MAX_PATH];
     wsprintfW(pattern, L"%s\\mods\\*.dll", g_own_dir);
@@ -75,6 +142,11 @@ static DWORD WINAPI load_mods(void*) {
         if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
         wchar_t full[MAX_PATH], message[MAX_PATH + 64];
         wsprintfW(full, L"%s\\mods\\%s", g_own_dir, entry.cFileName);
+        if (!has_on_mod_load_export(full)) {
+            wsprintfW(message, L"Skipped DLL without on_mod_load: %s", entry.cFileName);
+            mod_log(message);
+            continue;
+        }
         HMODULE mod = LoadLibraryW(full);
         if (!mod) {
             wsprintfW(message, L"Failed to load mod: %s", entry.cFileName);
@@ -83,7 +155,7 @@ static DWORD WINAPI load_mods(void*) {
         }
         auto on_load = reinterpret_cast<on_mod_load_fn>(GetProcAddress(mod, "on_mod_load"));
         if (!on_load) {
-            wsprintfW(message, L"Skipped mod without on_mod_load: %s", entry.cFileName);
+            wsprintfW(message, L"Failed to resolve on_mod_load: %s", entry.cFileName);
             mod_log(message);
             FreeLibrary(mod);
             continue;
