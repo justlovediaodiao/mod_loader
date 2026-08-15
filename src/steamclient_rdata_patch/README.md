@@ -8,7 +8,7 @@ HKCU\Software\Valve\Steam\ActiveProcess\SteamClientDll64
 ```
 
 It then installs a `LoadLibraryExW` detour. Requests for
-`steamclient64.dll` are redirected to `steamclient64_patched.dll` in that same
+`steamclient64.dll` are redirected to `steamclient6p.dll` in that same
 Steam installation directory. After the patched DLL loads, its loader entry's
 full path and base name are changed back to those of the original
 `steamclient64.dll`. No file in the game directory is used.
@@ -35,7 +35,7 @@ it under a different name:
 ```text
 C:\Program Files (x86)\Steam\
   steamclient64.dll
-  steamclient64_patched.dll
+  steamclient6p.dll
 ```
 
 Install mod loader first. Install the mod as:

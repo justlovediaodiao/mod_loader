@@ -101,7 +101,7 @@ static bool get_patched_steamclient_path() {
         if (*p == L'\\' || *p == L'/') slash = p;
     if (!slash) return false;
 
-    constexpr wchar_t patched_name[] = L"steamclient64_patched.dll";
+    constexpr wchar_t patched_name[] = L"steamclient6p.dll";
     const size_t directory_length =
         static_cast<size_t>(slash - g_patched_steamclient + 1);
     constexpr size_t patched_name_length =
@@ -220,7 +220,7 @@ extern "C" __declspec(dllexport)
 void MOD_LOADER_CALL on_mod_load(mod_log_fn logger) {
     g_log = logger;
     if (!get_patched_steamclient_path()) {
-        log_message(L"steamclient_rdata_patch: steamclient64_patched.dll was not found in the Steam directory");
+        log_message(L"steamclient_rdata_patch: steamclient6p.dll was not found in the Steam directory");
         return;
     }
 
