@@ -23,6 +23,9 @@ struct MonoObject;
 static HMODULE g_self;
 static mod_log_fn g_log;
 
+static constexpr int DEFAULT_FPS = -1;
+static constexpr int DEFAULT_VSYNC = 0;
+
 static void log(const char* message) {
     if (g_log) g_log(message);
 }
@@ -168,15 +171,16 @@ static bool invoke_mono_setters(HMODULE module, int fps, int vsync) {
 }
 
 static DWORD WINAPI fps_worker(void*) {
-    wchar_t ini[MAX_PATH];
+    wchar_t ini[MAX_PATH]{};
     if (!own_config_path(ini)) {
-        log("unity_fps_limit: failed to locate mods\\config.ini");
-        return 1;
+        log("unity_fps_limit: failed to locate mods\\config.ini; using defaults");
     }
     // Signed parsing is intentional: Unity uses targetFrameRate = -1 to select
     // the platform default frame rate behavior.
-    int fps = read_config_int(ini, L"fps", -1);
-    int vsync = read_config_int(ini, L"vsync", 0);
+    int fps = ini[0] != L'\0'
+        ? read_config_int(ini, L"fps", DEFAULT_FPS) : DEFAULT_FPS;
+    int vsync = ini[0] != L'\0'
+        ? read_config_int(ini, L"vsync", DEFAULT_VSYNC) : DEFAULT_VSYNC;
     log("unity_fps_limit: waiting for Unity scripting backend");
 
     for (;;) {
