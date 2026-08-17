@@ -12,7 +12,7 @@ extern "C" void load_functions(HMODULE dll);
 
 static CRITICAL_SECTION g_log_lock;
 
-static void MOD_LOADER_CALL mod_log(const wchar_t* text) {
+static void MOD_LOADER_CALL mod_log(const char* text) {
     if (!text) return;
     EnterCriticalSection(&g_log_lock);
     wchar_t path[MAX_PATH];
@@ -22,13 +22,25 @@ static void MOD_LOADER_CALL mod_log(const wchar_t* text) {
     if (file == INVALID_HANDLE_VALUE) { LeaveCriticalSection(&g_log_lock); return; }
     SYSTEMTIME now{};
     GetLocalTime(&now);
-    wchar_t line[768];
-    int count = wsprintfW(line, L"[%02u:%02u:%02u] %s\r\n", now.wHour,
-                          now.wMinute, now.wSecond, text);
+    char prefix[32];
+    int prefix_length = wsprintfA(prefix, "[%02u:%02u:%02u] ", now.wHour,
+                                  now.wMinute, now.wSecond);
     DWORD written;
-    WriteFile(file, line, (DWORD)(count * sizeof(wchar_t)), &written, nullptr);
+    WriteFile(file, prefix, static_cast<DWORD>(prefix_length), &written, nullptr);
+    WriteFile(file, text, static_cast<DWORD>(lstrlenA(text)), &written, nullptr);
+    static const char newline[] = "\r\n";
+    WriteFile(file, newline, sizeof(newline) - 1, &written, nullptr);
     CloseHandle(file);
     LeaveCriticalSection(&g_log_lock);
+}
+
+static void mod_log_wide(const wchar_t* text) {
+    if (!text) return;
+    char utf8[2048];
+    int converted = WideCharToMultiByte(CP_UTF8, 0, text, -1, utf8,
+                                        static_cast<int>(sizeof(utf8)),
+                                        nullptr, nullptr);
+    mod_log(converted ? utf8 : "Failed to convert log message");
 }
 
 static void get_own_directory(HMODULE self) {
@@ -135,7 +147,7 @@ static DWORD WINAPI load_mods(void*) {
     WIN32_FIND_DATAW entry{};
     HANDLE find = FindFirstFileW(pattern, &entry);
     if (find == INVALID_HANDLE_VALUE) {
-        mod_log(L"No mods directory or no DLL mods found");
+        mod_log("No mods directory or no DLL mods found");
         return 0;
     }
     do {
@@ -144,27 +156,27 @@ static DWORD WINAPI load_mods(void*) {
         wsprintfW(full, L"%s\\mods\\%s", g_own_dir, entry.cFileName);
         if (!has_on_mod_load_export(full)) {
             wsprintfW(message, L"Skipped DLL without on_mod_load: %s", entry.cFileName);
-            mod_log(message);
+            mod_log_wide(message);
             continue;
         }
         HMODULE mod = LoadLibraryW(full);
         if (!mod) {
             wsprintfW(message, L"Failed to load mod: %s", entry.cFileName);
-            mod_log(message);
+            mod_log_wide(message);
             continue;
         }
         auto on_load = reinterpret_cast<on_mod_load_fn>(GetProcAddress(mod, "on_mod_load"));
         if (!on_load) {
             wsprintfW(message, L"Failed to resolve on_mod_load: %s", entry.cFileName);
-            mod_log(message);
+            mod_log_wide(message);
             FreeLibrary(mod);
             continue;
         }
         wsprintfW(message, L"Loading mod: %s", entry.cFileName);
-        mod_log(message);
+        mod_log_wide(message);
         on_load(mod_log);
         wsprintfW(message, L"Loaded mod: %s", entry.cFileName);
-        mod_log(message);
+        mod_log_wide(message);
     } while (FindNextFileW(find, &entry));
     FindClose(find);
     return 0;

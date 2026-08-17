@@ -31,7 +31,7 @@ must export the following C symbol:
 
 extern "C" __declspec(dllexport)
 void __cdecl on_mod_load(mod_log_fn log) {
-    log(L"my mod loaded");
+    log("my mod loaded");
 }
 ```
 

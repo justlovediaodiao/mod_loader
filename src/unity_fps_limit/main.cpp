@@ -23,7 +23,7 @@ struct MonoObject;
 static HMODULE g_self;
 static mod_log_fn g_log;
 
-static void log(const wchar_t* message) {
+static void log(const char* message) {
     if (g_log) g_log(message);
 }
 
@@ -170,25 +170,25 @@ static bool invoke_mono_setters(HMODULE module, int fps, int vsync) {
 static DWORD WINAPI fps_worker(void*) {
     wchar_t ini[MAX_PATH];
     if (!own_config_path(ini)) {
-        log(L"unity_fps_limit: failed to locate mods\\config.ini");
+        log("unity_fps_limit: failed to locate mods\\config.ini");
         return 1;
     }
     // Signed parsing is intentional: Unity uses targetFrameRate = -1 to select
     // the platform default frame rate behavior.
     int fps = read_config_int(ini, L"fps", -1);
     int vsync = read_config_int(ini, L"vsync", 0);
-    log(L"unity_fps_limit: waiting for Unity scripting backend");
+    log("unity_fps_limit: waiting for Unity scripting backend");
 
     for (;;) {
         HMODULE il2cpp = GetModuleHandleW(L"GameAssembly.dll");
         if (il2cpp && invoke_il2cpp_setters(il2cpp, fps, vsync)) {
-            log(L"unity_fps_limit: applied through IL2CPP");
+            log("unity_fps_limit: applied through IL2CPP");
             return 0;
         }
         HMODULE mono = GetModuleHandleW(L"mono-2.0-bdwgc.dll");
         if (!mono) mono = GetModuleHandleW(L"mono.dll");
         if (mono && invoke_mono_setters(mono, fps, vsync)) {
-            log(L"unity_fps_limit: applied through Mono");
+            log("unity_fps_limit: applied through Mono");
             return 0;
         }
         Sleep(1000);
@@ -199,7 +199,7 @@ extern "C" __declspec(dllexport) void MOD_LOADER_CALL on_mod_load(mod_log_fn log
     g_log = logger;
     HANDLE thread = CreateThread(nullptr, 0, fps_worker, nullptr, 0, nullptr);
     if (thread) CloseHandle(thread);
-    else log(L"unity_fps_limit: failed to create worker thread");
+    else log("unity_fps_limit: failed to create worker thread");
 }
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {

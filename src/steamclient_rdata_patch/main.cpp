@@ -60,14 +60,14 @@ static wchar_t g_patched_steamclient[MAX_PATH];
 static HMODULE g_loaded_steamclient;
 static CRITICAL_SECTION g_redirect_lock;
 
-static void log_message(const wchar_t* message) {
+static void log_message(const char* message) {
     if (g_log) g_log(message);
 }
 
-static void log_hook_error(const wchar_t* operation, MH_STATUS status) {
-    wchar_t message[256];
-    wsprintfW(message,
-              L"steamclient_rdata_patch: %s failed (MinHook status %d)",
+static void log_hook_error(const char* operation, MH_STATUS status) {
+    char message[256];
+    wsprintfA(message,
+              "steamclient_rdata_patch: %s failed (MinHook status %d)",
               operation, static_cast<int>(status));
     log_message(message);
 }
@@ -176,11 +176,11 @@ static HMODULE WINAPI hooked_load_library_ex_w(
         }
         LeaveCriticalSection(&g_redirect_lock);
 
-        log_message(L"steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll");
+        log_message("steamclient_rdata_patch: loading Steam-directory patched steamclient64.dll");
         if (module && names_restored)
-            log_message(L"steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll");
+            log_message("steamclient_rdata_patch: restored loader entry path and name to steamclient64.dll");
         else if (module)
-            log_message(L"steamclient_rdata_patch: failed to restore loader entry path and name");
+            log_message("steamclient_rdata_patch: failed to restore loader entry path and name");
         return module;
     }
     return g_original_load_library_ex_w(file_name, file, flags);
@@ -189,7 +189,7 @@ static HMODULE WINAPI hooked_load_library_ex_w(
 static void install_hook() {
     MH_STATUS status = MH_Initialize();
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
-        log_hook_error(L"MH_Initialize", status);
+        log_hook_error("MH_Initialize", status);
         return;
     }
 
@@ -202,31 +202,31 @@ static void install_hook() {
         &target
     );
     if (status != MH_OK) {
-        log_hook_error(L"MH_CreateHookApiEx", status);
+        log_hook_error("MH_CreateHookApiEx", status);
         return;
     }
 
     status = MH_EnableHook(target);
     if (status != MH_OK) {
-        log_hook_error(L"MH_EnableHook", status);
+        log_hook_error("MH_EnableHook", status);
         MH_RemoveHook(target);
         return;
     }
 
-    log_message(L"steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect");
+    log_message("steamclient_rdata_patch: installed Steam-directory LoadLibraryExW redirect");
 }
 
 extern "C" __declspec(dllexport)
 void MOD_LOADER_CALL on_mod_load(mod_log_fn logger) {
     g_log = logger;
     if (!get_patched_steamclient_path()) {
-        log_message(L"steamclient_rdata_patch: steamclient6p.dll was not found in the Steam directory");
+        log_message("steamclient_rdata_patch: steamclient6p.dll was not found in the Steam directory");
         return;
     }
 
     HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
     if (!ntdll) {
-        log_message(L"steamclient_rdata_patch: failed to find ntdll.dll");
+        log_message("steamclient_rdata_patch: failed to find ntdll.dll");
         return;
     }
     g_ldr_lock_loader_lock = reinterpret_cast<LdrLockLoaderLockFn>(
@@ -234,7 +234,7 @@ void MOD_LOADER_CALL on_mod_load(mod_log_fn logger) {
     g_ldr_unlock_loader_lock = reinterpret_cast<LdrUnlockLoaderLockFn>(
         GetProcAddress(ntdll, "LdrUnlockLoaderLock"));
     if (!g_ldr_lock_loader_lock || !g_ldr_unlock_loader_lock) {
-        log_message(L"steamclient_rdata_patch: failed to resolve loader lock functions");
+        log_message("steamclient_rdata_patch: failed to resolve loader lock functions");
         return;
     }
     InitializeCriticalSection(&g_redirect_lock);
