@@ -1,4 +1,4 @@
-name: Dynamic FPS
+name: Build dynamic_fps
 
 on:
   workflow_dispatch:
@@ -9,41 +9,22 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest
-    defaults:
-      run:
-        working-directory: src/dynamic_fps
-
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
-      - name: Set up MSVC
-        uses: step-security/msvc-dev-cmd@v1
-
       - name: Configure
-        run: cmake -S . -B build -A x64
+        run: cmake -S src/dynamic_fps -B build/dynamic_fps -A x64
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build/dynamic_fps --config Release --parallel
 
-      - name: Package
-        shell: pwsh
-        run: |
-          $packageDirectory = Join-Path $env:RUNNER_TEMP 'dynamic_fps'
+      - name: Install distributable files
+        run: cmake --install build/dynamic_fps --config Release --prefix dist/dynamic_fps
 
-          New-Item -ItemType Directory -Force `
-            (Join-Path $packageDirectory 'mods') | Out-Null
-          Copy-Item `
-            'build/Release/dynamic_fps.dll' `
-            (Join-Path $packageDirectory 'mods/')
-          Copy-Item `
-            'config.ini' `
-            (Join-Path $packageDirectory 'mods/')
-
-      - name: Upload package
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: dynamic_fps-windows-x64
-          path: ${{ runner.temp }}/dynamic_fps
-
+          path: dist/dynamic_fps
           if-no-files-found: error
