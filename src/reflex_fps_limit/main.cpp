@@ -92,7 +92,7 @@ streamline::Result hooked_set_options(
     const streamline::ReflexOptions& options) {
     // EnterCriticalSection(&g_context.set_options_lock);
     streamline::ReflexOptions overridden = options;
-    overridden.frame_limit_us = g_context.frame_limit_us;
+    // overridden.frame_limit_us = g_context.frame_limit_us;
     const streamline::Result result =
         g_context.original_set_options(overridden);
     // LeaveCriticalSection(&g_context.set_options_lock);
