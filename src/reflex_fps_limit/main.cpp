@@ -20,8 +20,8 @@ constexpr DWORD RETRY_INTERVAL_MS = 1000;
 struct Context {
     HMODULE self{};
     mod_log_fn log{};
-    CRITICAL_SECTION set_options_lock{};
     uint32_t frame_limit_us{};
+    bool log_enabled{};
     streamline::ReflexSetOptions original_set_options{};
 };
 
@@ -73,6 +73,10 @@ uint32_t read_config_fps(const wchar_t* path) {
     return static_cast<uint32_t>(parsed);
 }
 
+bool read_config_log(const wchar_t* path) {
+    return GetPrivateProfileIntW(L"reflex_fps_limit", L"log", 0, path) != 0;
+}
+
 uint32_t fps_to_frame_limit_us(uint32_t fps) {
     if (fps == 0) {
         return 0;
@@ -90,21 +94,21 @@ void load_export(HMODULE module, const char* name, T& destination) {
 
 streamline::Result hooked_set_options(
     const streamline::ReflexOptions& options) {
-    // EnterCriticalSection(&g_context.set_options_lock);
     streamline::ReflexOptions overridden = options;
-    // overridden.frame_limit_us = g_context.frame_limit_us;
+    overridden.frame_limit_us = g_context.frame_limit_us;
     const streamline::Result result =
         g_context.original_set_options(overridden);
-    // LeaveCriticalSection(&g_context.set_options_lock);
 
-    char message[256]{};
-    snprintf(message, sizeof(message),
-             "reflex_fps_limit: slReflexSetOptions frame limit %u -> %u us "
-             "returned %d",
-             static_cast<unsigned int>(options.frame_limit_us),
-             static_cast<unsigned int>(overridden.frame_limit_us),
-             static_cast<int>(result));
-    log(message);
+    if (g_context.log_enabled) {
+        char message[256]{};
+        snprintf(message, sizeof(message),
+                 "reflex_fps_limit: slReflexSetOptions frame limit %u -> %u us "
+                 "returned %d",
+                 static_cast<unsigned int>(options.frame_limit_us),
+                 static_cast<unsigned int>(overridden.frame_limit_us),
+                 static_cast<int>(result));
+        log(message);
+    }
     return result;
 }
 
@@ -149,6 +153,7 @@ DWORD WINAPI worker(void*) {
     uint32_t fps = DEFAULT_FPS;
     if (own_config_path(config_path)) {
         fps = read_config_fps(config_path);
+        g_context.log_enabled = read_config_log(config_path);
     } else {
         log("reflex_fps_limit: failed to locate config.ini; using 60 FPS");
     }
@@ -187,10 +192,6 @@ DWORD WINAPI worker(void*) {
         return 0;
     }
     log("reflex_fps_limit: hooked slReflexSetOptions");
-
-    // streamline::ReflexOptions options{};
-    // log("reflex_fps_limit: actively calling slReflexSetOptions");
-    // hooked_set_options(options);
     return 0;
 }
 
@@ -199,7 +200,6 @@ DWORD WINAPI worker(void*) {
 extern "C" __declspec(dllexport) void MOD_LOADER_CALL
 on_mod_load(mod_log_fn logger) {
     g_context.log = logger;
-    InitializeCriticalSection(&g_context.set_options_lock);
     const HANDLE thread = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
     if (thread != nullptr) {
         CloseHandle(thread);
