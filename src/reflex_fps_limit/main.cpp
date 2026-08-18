@@ -90,12 +90,12 @@ void load_export(HMODULE module, const char* name, T& destination) {
 
 streamline::Result hooked_set_options(
     const streamline::ReflexOptions& options) {
-    EnterCriticalSection(&g_context.set_options_lock);
+    // EnterCriticalSection(&g_context.set_options_lock);
     streamline::ReflexOptions overridden = options;
     overridden.frame_limit_us = g_context.frame_limit_us;
     const streamline::Result result =
         g_context.original_set_options(overridden);
-    LeaveCriticalSection(&g_context.set_options_lock);
+    // LeaveCriticalSection(&g_context.set_options_lock);
 
     char message[256]{};
     snprintf(message, sizeof(message),
@@ -188,9 +188,9 @@ DWORD WINAPI worker(void*) {
     }
     log("reflex_fps_limit: hooked slReflexSetOptions");
 
-    streamline::ReflexOptions options{};
-    log("reflex_fps_limit: actively calling slReflexSetOptions");
-    hooked_set_options(options);
+    // streamline::ReflexOptions options{};
+    // log("reflex_fps_limit: actively calling slReflexSetOptions");
+    // hooked_set_options(options);
     return 0;
 }
 
