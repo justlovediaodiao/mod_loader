@@ -1,0 +1,30 @@
+name: Build reflex_fps_limit
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S src/reflex_fps_limit -B build/reflex_fps_limit -A x64
+
+      - name: Build
+        run: cmake --build build/reflex_fps_limit --config Release --parallel
+
+      - name: Install distributable files
+        run: cmake --install build/reflex_fps_limit --config Release --prefix dist/reflex_fps_limit
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: reflex_fps_limit-windows-x64
+          path: dist/reflex_fps_limit
+          if-no-files-found: error
