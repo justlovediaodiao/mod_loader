@@ -3,15 +3,15 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Minimal, version-1 Streamline ABI used by this mod. Streamline structures are
-// append-only, so requesting v1 keeps this compatible with newer runtimes while
-// exposing the frame-presentation counter that has existed since DLSS-G v1.
+// Minimal version-1 Streamline ABI used by this mod. Streamline structures are
+// append-only, so requesting v1 remains compatible with newer runtimes.
 namespace streamline {
 
 constexpr uint32_t FEATURE_DLSS_G = 1000;
+constexpr uint32_t FEATURE_REFLEX = 3;
 constexpr uint32_t STRUCT_VERSION_1 = 1;
 
-enum class Result {
+enum class Result : int32_t {
     ok = 0,
 };
 
@@ -59,11 +59,32 @@ struct DLSSGState : BaseStructure {
 
 struct DLSSGOptions;
 
+enum class ReflexMode : int32_t {
+    off,
+    low_latency,
+    low_latency_with_boost,
+};
+
+struct ReflexOptions : BaseStructure {
+    ReflexOptions() {
+        struct_type = {0xf03af81a, 0x6d0b, 0x4902,
+                       {0xa6, 0x51, 0xc4, 0x96, 0x5e, 0x21, 0x54, 0x34}};
+        struct_version = STRUCT_VERSION_1;
+    }
+
+    ReflexMode mode{ReflexMode::off};
+    uint32_t frame_limit_us{};
+    bool use_markers_to_optimize{};
+    uint16_t virtual_key{};
+    uint32_t thread_id{};
+};
+
 using GetFeatureFunction =
     Result (*)(uint32_t feature, const char* function_name, void*& function);
 using DLSSGGetState = Result (*)(const ViewportHandle& viewport,
                                  DLSSGState& state,
                                  const DLSSGOptions* options);
+using ReflexSetOptions = Result (*)(const ReflexOptions& options);
 
 static_assert(sizeof(StructType) == 16);
 static_assert(sizeof(Result) == 4);
@@ -71,5 +92,6 @@ static_assert(sizeof(DLSSGStatus) == 4);
 static_assert(sizeof(BaseStructure) == 32);
 static_assert(sizeof(ViewportHandle) == 40);
 static_assert(sizeof(DLSSGState) == 56);
+static_assert(sizeof(ReflexOptions) == 48);
 
 } // namespace streamline

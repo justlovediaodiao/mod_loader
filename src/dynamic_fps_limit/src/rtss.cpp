@@ -84,12 +84,12 @@ namespace rtss {
 bool set_fps_limit(uint32_t fps, char* message, size_t message_size) {
     if (!initialize()) {
         snprintf(message, message_size,
-                 "dynamic_fps: RTSS is unavailable or incompatible");
+                 "dynamic_fps_limit: RTSS is unavailable or incompatible");
         return false;
     }
     if (!initialize_profile()) {
         snprintf(message, message_size,
-                 "dynamic_fps: Failed to determine the game profile");
+                 "dynamic_fps_limit: Failed to determine the game profile");
         return false;
     }
 
@@ -103,7 +103,7 @@ bool set_fps_limit(uint32_t fps, char* message, size_t message_size) {
         !g_state.set_property("FramerateLimit", reinterpret_cast<LPBYTE>(&value),
                               sizeof(value))) {
         snprintf(message, message_size,
-                 "dynamic_fps: Failed to update RTSS profile %s",
+                 "dynamic_fps_limit: Failed to update RTSS profile %s",
                  g_state.profile);
         return false;
     }
@@ -112,7 +112,7 @@ bool set_fps_limit(uint32_t fps, char* message, size_t message_size) {
     g_state.update_profiles();
 
     snprintf(message, message_size,
-             "dynamic_fps: RTSS profile %s set to %u FPS",
+             "dynamic_fps_limit: RTSS profile %s set to %u FPS",
              g_state.profile, static_cast<unsigned int>(fps));
     return true;
 }

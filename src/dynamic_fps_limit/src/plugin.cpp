@@ -18,10 +18,24 @@ namespace {
 
 constexpr uint32_t DEFAULT_FRAME_GENERATION_OFF_FPS = 60;
 constexpr uint32_t DEFAULT_FRAME_GENERATION_ON_FPS = 120;
+constexpr DWORD RETRY_INTERVAL_MS = 1000;
 constexpr DWORD CHECK_INTERVAL_MS = 300;
+
+enum class Limiter {
+    reflex,
+    rtss,
+};
+
+struct Config {
+    uint32_t frame_generation_off_fps{DEFAULT_FRAME_GENERATION_OFF_FPS};
+    uint32_t frame_generation_on_fps{DEFAULT_FRAME_GENERATION_ON_FPS};
+    Limiter limiter{Limiter::reflex};
+};
 
 HMODULE g_self{};
 mod_log_fn g_log{};
+
+void log(const char* message);
 
 bool own_config_path(wchar_t path[MAX_PATH]) {
     const DWORD length = GetModuleFileNameW(g_self, path, MAX_PATH);
@@ -48,7 +62,7 @@ uint32_t read_config_fps(const wchar_t* path, const wchar_t* key,
     wchar_t fallback_text[32]{};
     wchar_t value[32]{};
     wsprintfW(fallback_text, L"%u", static_cast<unsigned int>(fallback));
-    GetPrivateProfileStringW(L"dynamic_fps", key, fallback_text, value,
+    GetPrivateProfileStringW(L"dynamic_fps_limit", key, fallback_text, value,
                              static_cast<DWORD>(sizeof(value) /
                                                 sizeof(value[0])),
                              path);
@@ -63,38 +77,70 @@ uint32_t read_config_fps(const wchar_t* path, const wchar_t* key,
     return static_cast<uint32_t>(parsed);
 }
 
+Limiter read_config_limiter(const wchar_t* path) {
+    wchar_t value[32]{};
+    GetPrivateProfileStringW(L"dynamic_fps_limit", L"limiter", L"reflex", value,
+                             static_cast<DWORD>(sizeof(value) /
+                                                sizeof(value[0])),
+                             path);
+    if (_wcsicmp(value, L"rtss") == 0) {
+        return Limiter::rtss;
+    }
+    if (_wcsicmp(value, L"reflex") != 0) {
+        log("dynamic_fps_limit: Invalid limiter in config.ini; using reflex");
+    }
+    return Limiter::reflex;
+}
+
+Config read_config(const wchar_t* path) {
+    Config config{};
+    if (path == nullptr) {
+        return config;
+    }
+    config.frame_generation_off_fps = read_config_fps(
+        path, L"frame_generation_off_fps",
+        DEFAULT_FRAME_GENERATION_OFF_FPS);
+    config.frame_generation_on_fps = read_config_fps(
+        path, L"frame_generation_on_fps", DEFAULT_FRAME_GENERATION_ON_FPS);
+    config.limiter = read_config_limiter(path);
+    return config;
+}
+
 void log(const char* message) {
     if (g_log != nullptr) {
         g_log(message);
     }
 }
 
+bool set_fps_limit(Limiter limiter, uint32_t fps, char* message,
+                   size_t message_size) {
+    if (limiter == Limiter::reflex) {
+        return streamline::set_reflex_fps_limit(fps, message, message_size);
+    }
+    return rtss::set_fps_limit(fps, message, message_size);
+}
+
 DWORD WINAPI worker(void*) {
-    log("dynamic_fps: Initialized");
     wchar_t config_path[MAX_PATH]{};
     if (!own_config_path(config_path)) {
-        log("dynamic_fps: Failed to locate mods\\config.ini; using defaults");
+        log("dynamic_fps_limit: Failed to locate mods\\config.ini; using defaults");
     }
-    const uint32_t frame_generation_off_fps =
-        config_path[0] != L'\0'
-            ? read_config_fps(config_path, L"frame_generation_off_fps",
-                              DEFAULT_FRAME_GENERATION_OFF_FPS)
-            : DEFAULT_FRAME_GENERATION_OFF_FPS;
-    const uint32_t frame_generation_on_fps =
-        config_path[0] != L'\0'
-            ? read_config_fps(config_path, L"frame_generation_on_fps",
-                              DEFAULT_FRAME_GENERATION_ON_FPS)
-            : DEFAULT_FRAME_GENERATION_ON_FPS;
+    const Config config =
+        read_config(config_path[0] != L'\0' ? config_path : nullptr);
     char message[256]{};
-    snprintf(message, sizeof(message),
-             "dynamic_fps: Frame generation OFF: %u FPS; ON: %u FPS",
-             static_cast<unsigned int>(frame_generation_off_fps),
-             static_cast<unsigned int>(frame_generation_on_fps));
-    log(message);
+
+    if (config.limiter == Limiter::reflex) {
+        while (!streamline::install_reflex_hook(
+            config.frame_generation_off_fps, message, sizeof(message))) {
+            log(message);
+            Sleep(RETRY_INTERVAL_MS);
+        }
+        log("dynamic_fps_limit: Reflex hook installed");
+    }
 
     uint32_t current_fps = 0;
     bool has_current_fps = false;
-    bool rtss_warning_logged = false;
+    bool limiter_warning_logged = false;
     bool streamline_warning_logged = false;
     bool frame_generation_active = false;
 
@@ -114,16 +160,17 @@ DWORD WINAPI worker(void*) {
                 streamline::FrameGenerationState::active;
         }
         const uint32_t target_fps = frame_generation_active
-                                        ? frame_generation_on_fps
-                                        : frame_generation_off_fps;
+                                        ? config.frame_generation_on_fps
+                                        : config.frame_generation_off_fps;
         if (!has_current_fps || target_fps != current_fps) {
-            if (rtss::set_fps_limit(target_fps, message, sizeof(message))) {
+            if (set_fps_limit(config.limiter, target_fps, message,
+                              sizeof(message))) {
                 current_fps = target_fps;
                 has_current_fps = true;
-                rtss_warning_logged = false;
+                limiter_warning_logged = false;
                 log(message);
-            } else if (!rtss_warning_logged) {
-                rtss_warning_logged = true;
+            } else if (!limiter_warning_logged) {
+                limiter_warning_logged = true;
                 log(message);
             }
         }
@@ -140,7 +187,7 @@ on_mod_load(mod_log_fn logger) {
     if (thread != nullptr) {
         CloseHandle(thread);
     } else {
-        log("dynamic_fps: Failed to create worker thread");
+        log("dynamic_fps_limit: Failed to create worker thread");
     }
 }
 
