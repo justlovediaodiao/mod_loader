@@ -26,6 +26,7 @@ struct ReflexContext {
     }
 
     CRITICAL_SECTION set_options_lock{};
+    bool set_options_lock_initialized{};
     std::atomic<bool> initial_set_options_complete{};
     std::atomic<uint32_t> frame_limit_us{};
     streamline::ReflexOptions last_options{};
@@ -189,8 +190,11 @@ bool install_hooks(bool use_reflex, uint32_t initial_reflex_fps,
                                  std::memory_order_relaxed);
     g_dlssg.callback = callback;
     g_dlssg.mode = DLSSGMode::off;
-    if (use_reflex) {
+    if (use_reflex && !g_reflex.set_options_lock_initialized) {
         InitializeCriticalSection(&g_reflex.set_options_lock);
+        g_reflex.set_options_lock_initialized = true;
+    }
+    if (use_reflex) {
         g_reflex.initial_set_options_complete.store(
             false, std::memory_order_relaxed);
     }

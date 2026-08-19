@@ -18,6 +18,7 @@ namespace {
 
 constexpr uint32_t DEFAULT_FRAME_GENERATION_OFF_FPS = 60;
 constexpr uint32_t DEFAULT_FRAME_GENERATION_ON_FPS = 120;
+constexpr DWORD RETRY_INTERVAL_MS = 1000;
 
 enum class Limiter {
     reflex,
@@ -136,7 +137,7 @@ void on_frame_generation_change(bool active) {
     }
 }
 
-void initialize() {
+DWORD WINAPI worker(void*) {
     wchar_t config_path[MAX_PATH]{};
     if (!own_config_path(config_path)) {
         log("dynamic_fps_limit: Failed to locate mods\\config.ini; using defaults");
@@ -145,13 +146,15 @@ void initialize() {
         read_config(config_path[0] != L'\0' ? config_path : nullptr);
 
     char message[256]{};
-    if (!streamline::install_hooks(
-            g_config.limiter == Limiter::reflex,
-            g_config.frame_generation_off_fps, on_frame_generation_change,
-            message, sizeof(message))) {
+    while (!streamline::install_hooks(
+        g_config.limiter == Limiter::reflex,
+        g_config.frame_generation_off_fps, on_frame_generation_change, message,
+        sizeof(message))) {
         log(message);
-        return;
+        Sleep(RETRY_INTERVAL_MS);
     }
+    log("dynamic_fps_limit: Hooks installed");
+    return 0;
 }
 
 } // namespace
@@ -159,7 +162,12 @@ void initialize() {
 extern "C" __declspec(dllexport) void MOD_LOADER_CALL
 on_mod_load(mod_log_fn logger) {
     g_log = logger;
-    initialize();
+    const HANDLE thread = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
+    if (thread != nullptr) {
+        CloseHandle(thread);
+    } else {
+        log("dynamic_fps_limit: Failed to create worker thread");
+    }
 }
 
 extern "C" BOOL WINAPI DllMain(HMODULE module, DWORD reason, void*) {
