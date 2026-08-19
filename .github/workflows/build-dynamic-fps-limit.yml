@@ -1,4 +1,4 @@
-name: Build dynamic_fps
+name: Build dynamic_fps_limit
 
 on:
   workflow_dispatch:
@@ -14,17 +14,17 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -S src/dynamic_fps -B build/dynamic_fps -A x64
+        run: cmake -S src/dynamic_fps_limit -B build/dynamic_fps_limit -A x64
 
       - name: Build
-        run: cmake --build build/dynamic_fps --config Release --parallel
+        run: cmake --build build/dynamic_fps_limit --config Release --parallel
 
       - name: Install distributable files
-        run: cmake --install build/dynamic_fps --config Release --prefix dist/dynamic_fps
+        run: cmake --install build/dynamic_fps_limit --config Release --prefix dist/dynamic_fps_limit
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: dynamic_fps-windows-x64
-          path: dist/dynamic_fps
+          name: dynamic_fps_limit-windows-x64
+          path: dist/dynamic_fps_limit
           if-no-files-found: error

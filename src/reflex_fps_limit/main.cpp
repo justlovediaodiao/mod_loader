@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
+#include <atomic>
 #include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,8 +21,9 @@ constexpr DWORD RETRY_INTERVAL_MS = 1000;
 struct Context {
     HMODULE self{};
     mod_log_fn log{};
+    CRITICAL_SECTION set_options_lock{};
     uint32_t frame_limit_us{};
-    bool log_enabled{};
+    std::atomic<bool> initial_set_options_complete{};
     streamline::ReflexSetOptions original_set_options{};
 };
 
@@ -73,10 +75,6 @@ uint32_t read_config_fps(const wchar_t* path) {
     return static_cast<uint32_t>(parsed);
 }
 
-bool read_config_log(const wchar_t* path) {
-    return GetPrivateProfileIntW(L"reflex_fps_limit", L"log", 0, path) != 0;
-}
-
 uint32_t fps_to_frame_limit_us(uint32_t fps) {
     if (fps == 0) {
         return 0;
@@ -93,19 +91,26 @@ void load_export(HMODULE module, const char* name, T& destination) {
 }
 
 streamline::Result hooked_set_options(
-    const streamline::ReflexOptions& options) {
-    streamline::ReflexOptions overridden = options;
-    overridden.frame_limit_us = g_context.frame_limit_us;
-    const streamline::Result result =
-        g_context.original_set_options(overridden);
+    streamline::ReflexOptions& options) {
+    const bool lock_required = !g_context.initial_set_options_complete.load(
+        std::memory_order_relaxed);
+    if (lock_required) {
+        EnterCriticalSection(&g_context.set_options_lock);
+    }
 
-    if (g_context.log_enabled) {
+    const uint32_t original_frame_limit_us = options.frame_limit_us;
+    options.frame_limit_us = g_context.frame_limit_us;
+    const streamline::Result result = g_context.original_set_options(options);
+    options.frame_limit_us = original_frame_limit_us;
+
+    if (lock_required) {
+        LeaveCriticalSection(&g_context.set_options_lock);
         char message[256]{};
         snprintf(message, sizeof(message),
                  "reflex_fps_limit: slReflexSetOptions frame limit %u -> %u us "
                  "returned %d",
-                 static_cast<unsigned int>(options.frame_limit_us),
-                 static_cast<unsigned int>(overridden.frame_limit_us),
+                 static_cast<unsigned int>(original_frame_limit_us),
+                 static_cast<unsigned int>(g_context.frame_limit_us),
                  static_cast<int>(result));
         log(message);
     }
@@ -153,7 +158,6 @@ DWORD WINAPI worker(void*) {
     uint32_t fps = DEFAULT_FPS;
     if (own_config_path(config_path)) {
         fps = read_config_fps(config_path);
-        g_context.log_enabled = read_config_log(config_path);
     } else {
         log("reflex_fps_limit: failed to locate config.ini; using 60 FPS");
     }
@@ -192,6 +196,13 @@ DWORD WINAPI worker(void*) {
         return 0;
     }
     log("reflex_fps_limit: hooked slReflexSetOptions");
+
+    streamline::ReflexOptions options{};
+    options.mode = streamline::ReflexMode::low_latency;
+    log("reflex_fps_limit: calling slReflexSetOptions after initialization");
+    hooked_set_options(options);
+    g_context.initial_set_options_complete.store(true,
+                                                  std::memory_order_relaxed);
     return 0;
 }
 
@@ -200,6 +211,7 @@ DWORD WINAPI worker(void*) {
 extern "C" __declspec(dllexport) void MOD_LOADER_CALL
 on_mod_load(mod_log_fn logger) {
     g_context.log = logger;
+    InitializeCriticalSection(&g_context.set_options_lock);
     const HANDLE thread = CreateThread(nullptr, 0, worker, nullptr, 0, nullptr);
     if (thread != nullptr) {
         CloseHandle(thread);
