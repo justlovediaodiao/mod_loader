@@ -40,7 +40,7 @@ struct ReflexOptions : BaseStructure {
         struct_version = STRUCT_VERSION_1;
     }
 
-    ReflexMode mode{off};
+    ReflexMode mode{ReflexMode::off};
     uint32_t frame_limit_us{};
     bool use_markers_to_optimize{};
     uint16_t virtual_key{};

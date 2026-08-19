@@ -49,7 +49,3 @@ set_target_properties(dynamic_fps_limit PROPERTIES
 
 install(TARGETS dynamic_fps_limit RUNTIME DESTINATION .)
 install(FILES config.ini DESTINATION .)
-
-if(MSVC)
-    target_compile_options(dynamic_fps_limit PRIVATE /W4 /WX /utf-8)
-endif()
