@@ -27,21 +27,12 @@ struct ReflexContext {
 
     CRITICAL_SECTION set_options_lock{};
     bool set_options_lock_initialized{};
-    std::atomic<bool> initial_set_options_complete{};
     std::atomic<uint32_t> frame_limit_us{};
     streamline::ReflexOptions last_options{};
     streamline::ReflexSetOptions original_set_options{};
 };
 
 ReflexContext g_reflex{};
-
-struct DLSSGContext {
-    streamline::DLSSGSetOptions original_set_options{};
-    streamline::FrameGenerationCallback callback{};
-    streamline::DLSSGMode mode{streamline::DLSSGMode::off};
-};
-
-DLSSGContext g_dlssg{};
 
 uint32_t fps_to_frame_limit_us(uint32_t fps) {
     if (fps == 0) {
@@ -53,13 +44,7 @@ uint32_t fps_to_frame_limit_us(uint32_t fps) {
 
 streamline::Result hooked_reflex_set_options(
     streamline::ReflexOptions& options) {
-    // Only the handoff from hook installation to the game thread is
-    // concurrent. Calls made after that handoff stay on the game thread.
-    const bool lock_required =
-        !g_reflex.initial_set_options_complete.load(std::memory_order_acquire);
-    if (lock_required) {
-        EnterCriticalSection(&g_reflex.set_options_lock);
-    }
+    EnterCriticalSection(&g_reflex.set_options_lock);
 
     const uint32_t original_frame_limit_us = options.frame_limit_us;
     g_reflex.last_options = options;
@@ -74,25 +59,7 @@ streamline::Result hooked_reflex_set_options(
         g_reflex.original_set_options(options);
     options.frame_limit_us = original_frame_limit_us;
 
-    if (lock_required) {
-        LeaveCriticalSection(&g_reflex.set_options_lock);
-    }
-    return result;
-}
-
-streamline::Result hooked_dlssg_set_options(
-    const streamline::ViewportHandle& viewport,
-    const streamline::DLSSGOptions& options) {
-    const streamline::Result result =
-        g_dlssg.original_set_options(viewport, options);
-    if (result != streamline::Result::ok) {
-        return result;
-    }
-
-    if (options.mode != g_dlssg.mode) {
-        g_dlssg.mode = options.mode;
-        g_dlssg.callback(options.mode != streamline::DLSSGMode::off);
-    }
+    LeaveCriticalSection(&g_reflex.set_options_lock);
     return result;
 }
 
@@ -144,106 +111,102 @@ bool create_hook(void* hook_target, void* detour, void** original,
     return true;
 }
 
-void remove_hooks(void* reflex_hook_target, void* dlssg_hook_target) {
-    if (reflex_hook_target != nullptr &&
-        MH_RemoveHook(reflex_hook_target) == MH_OK) {
+void remove_reflex_hook(void* hook_target) {
+    if (hook_target != nullptr && MH_RemoveHook(hook_target) == MH_OK) {
         g_reflex.original_set_options = nullptr;
     }
-    if (dlssg_hook_target != nullptr &&
-        MH_RemoveHook(dlssg_hook_target) == MH_OK) {
-        g_dlssg.original_set_options = nullptr;
-        g_dlssg.callback = nullptr;
+}
+
+streamline::DLSSGGetState initialize_dlssg(char* message,
+                                           size_t message_size) {
+    static streamline::DLSSGGetState get_state{};
+    if (get_state != nullptr) {
+        return get_state;
     }
+
+    void* address{};
+    if (!find_feature_function(streamline::FEATURE_DLSS_G,
+                               "slDLSSGGetState", address, message,
+                               message_size)) {
+        return nullptr;
+    }
+
+    static_assert(sizeof(get_state) == sizeof(address));
+    memcpy(&get_state, &address, sizeof(get_state));
+    return get_state;
 }
 
 } // namespace
 
 namespace streamline {
 
-bool install_hooks(bool use_reflex, uint32_t initial_reflex_fps,
-                   FrameGenerationCallback callback, char* message,
-                   size_t message_size) {
+FrameGenerationState get_frame_generation_state(char* message,
+                                                size_t message_size) {
     if (message_size > 0) {
         message[0] = '\0';
     }
 
-    void* reflex_hook_target{};
-    if (use_reflex &&
-        !find_feature_function(FEATURE_REFLEX, "slReflexSetOptions",
-                               reflex_hook_target, message, message_size)) {
-        return false;
+    const DLSSGGetState get_state = initialize_dlssg(message, message_size);
+    if (get_state == nullptr) {
+        return FrameGenerationState::error;
     }
 
-    void* dlssg_hook_target{};
-    if (!find_feature_function(FEATURE_DLSS_G, "slDLSSGSetOptions",
-                               dlssg_hook_target, message, message_size)) {
-        return false;
+    ViewportHandle viewport{0};
+    DLSSGState state{};
+    if (get_state(viewport, state, nullptr) != Result::ok) {
+        snprintf(message, message_size,
+                 "dynamic_fps_limit: Failed to query NVIDIA DLSS-G state");
+        return FrameGenerationState::error;
     }
 
+    if (state.status != DLSSGStatus::ok) {
+        snprintf(message, message_size,
+                 "dynamic_fps_limit: NVIDIA DLSS-G is in an invalid runtime "
+                 "state");
+        return FrameGenerationState::error;
+    }
+
+    return state.num_frames_actually_presented > 1
+               ? FrameGenerationState::active
+               : FrameGenerationState::inactive;
+}
+
+bool install_reflex_hook(uint32_t initial_fps, char* message,
+                         size_t message_size) {
+    if (message_size > 0) {
+        message[0] = '\0';
+    }
+
+    void* hook_target{};
+    if (!find_feature_function(FEATURE_REFLEX, "slReflexSetOptions",
+                               hook_target, message, message_size)) {
+        return false;
+    }
     MH_STATUS status = MH_Initialize();
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
         format_hook_error(message, message_size, "MH_Initialize", status);
         return false;
     }
 
-    g_reflex.frame_limit_us.store(fps_to_frame_limit_us(initial_reflex_fps),
+    g_reflex.frame_limit_us.store(fps_to_frame_limit_us(initial_fps),
                                  std::memory_order_relaxed);
-    g_dlssg.callback = callback;
-    g_dlssg.mode = DLSSGMode::off;
-    if (use_reflex && !g_reflex.set_options_lock_initialized) {
+    if (!g_reflex.set_options_lock_initialized) {
         InitializeCriticalSection(&g_reflex.set_options_lock);
         g_reflex.set_options_lock_initialized = true;
     }
-    if (use_reflex) {
-        g_reflex.initial_set_options_complete.store(
-            false, std::memory_order_relaxed);
-    }
 
-    if (use_reflex &&
-        !create_hook(
-            reflex_hook_target,
+    if (!create_hook(
+            hook_target,
             reinterpret_cast<void*>(&hooked_reflex_set_options),
             reinterpret_cast<void**>(&g_reflex.original_set_options), message,
             message_size)) {
-        g_dlssg.callback = nullptr;
         return false;
     }
-    if (!create_hook(
-            dlssg_hook_target,
-            reinterpret_cast<void*>(&hooked_dlssg_set_options),
-            reinterpret_cast<void**>(&g_dlssg.original_set_options), message,
-            message_size)) {
-        remove_hooks(reflex_hook_target, nullptr);
-        g_dlssg.callback = nullptr;
-        return false;
-    }
-
-    if (use_reflex) {
-        status = MH_QueueEnableHook(reflex_hook_target);
-        if (status != MH_OK) {
-            format_hook_error(message, message_size, "MH_QueueEnableHook",
-                              status);
-            remove_hooks(reflex_hook_target, dlssg_hook_target);
-            return false;
-        }
-    }
-    status = MH_QueueEnableHook(dlssg_hook_target);
+    status = MH_EnableHook(hook_target);
     if (status != MH_OK) {
-        format_hook_error(message, message_size, "MH_QueueEnableHook", status);
-        remove_hooks(reflex_hook_target, dlssg_hook_target);
+        format_hook_error(message, message_size, "MH_EnableHook", status);
+        remove_reflex_hook(hook_target);
         return false;
-    }
-    status = MH_ApplyQueued();
-    if (status != MH_OK) {
-        format_hook_error(message, message_size, "MH_ApplyQueued", status);
-        remove_hooks(reflex_hook_target, dlssg_hook_target);
-        return false;
-    }
-
-    if (use_reflex) {
-        hooked_reflex_set_options(g_reflex.last_options);
-        g_reflex.initial_set_options_complete.store(
-            true, std::memory_order_release);
     }
     return true;
 }
@@ -264,6 +227,9 @@ bool set_reflex_fps_limit(uint32_t fps, char* message,
         return false;
     }
 
+    snprintf(message, message_size,
+             "dynamic_fps_limit: Reflex limit set to %u FPS",
+             static_cast<unsigned int>(fps));
     return true;
 }
 

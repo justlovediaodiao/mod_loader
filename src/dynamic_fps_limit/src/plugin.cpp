@@ -19,6 +19,7 @@ namespace {
 constexpr uint32_t DEFAULT_FRAME_GENERATION_OFF_FPS = 60;
 constexpr uint32_t DEFAULT_FRAME_GENERATION_ON_FPS = 120;
 constexpr DWORD RETRY_INTERVAL_MS = 1000;
+constexpr DWORD CHECK_INTERVAL_MS = 300;
 
 enum class Limiter {
     reflex,
@@ -33,7 +34,6 @@ struct Config {
 
 HMODULE g_self{};
 mod_log_fn g_log{};
-Config g_config{};
 
 void log(const char* message);
 
@@ -112,29 +112,12 @@ void log(const char* message) {
     }
 }
 
-void on_frame_generation_change(bool active) {
-    const uint32_t target_fps = active
-                                    ? g_config.frame_generation_on_fps
-                                    : g_config.frame_generation_off_fps;
-    char message[256]{};
-    bool applied{};
-    if (g_config.limiter == Limiter::reflex) {
-        applied = streamline::set_reflex_fps_limit(
-            target_fps, message, sizeof(message));
-    } else {
-        applied = rtss::set_fps_limit(target_fps, message, sizeof(message));
+bool set_fps_limit(Limiter limiter, uint32_t fps, char* message,
+                   size_t message_size) {
+    if (limiter == Limiter::reflex) {
+        return streamline::set_reflex_fps_limit(fps, message, message_size);
     }
-
-    if (!applied) {
-        log(message);
-    } else {
-        snprintf(message, sizeof(message),
-                 "dynamic_fps_limit: frame generation %s; set %s limit to %u FPS",
-                 active ? "ON" : "OFF",
-                 g_config.limiter == Limiter::reflex ? "Reflex" : "RTSS",
-                 static_cast<unsigned int>(target_fps));
-        log(message);
-    }
+    return rtss::set_fps_limit(fps, message, message_size);
 }
 
 DWORD WINAPI worker(void*) {
@@ -142,19 +125,57 @@ DWORD WINAPI worker(void*) {
     if (!own_config_path(config_path)) {
         log("dynamic_fps_limit: Failed to locate mods\\config.ini; using defaults");
     }
-    g_config =
+    const Config config =
         read_config(config_path[0] != L'\0' ? config_path : nullptr);
-
     char message[256]{};
-    while (!streamline::install_hooks(
-        g_config.limiter == Limiter::reflex,
-        g_config.frame_generation_off_fps, on_frame_generation_change, message,
-        sizeof(message))) {
-        log(message);
-        Sleep(RETRY_INTERVAL_MS);
+
+    if (config.limiter == Limiter::reflex) {
+        while (!streamline::install_reflex_hook(
+            config.frame_generation_off_fps, message, sizeof(message))) {
+            log(message);
+            Sleep(RETRY_INTERVAL_MS);
+        }
+        log("dynamic_fps_limit: Reflex hook installed");
     }
-    log("dynamic_fps_limit: Hooks installed");
-    return 0;
+
+    uint32_t current_fps = 0;
+    bool has_current_fps = false;
+    bool limiter_warning_logged = false;
+    bool streamline_warning_logged = false;
+    bool frame_generation_active = false;
+
+    for (;;) {
+        const streamline::FrameGenerationState frame_generation_state =
+            streamline::get_frame_generation_state(message, sizeof(message));
+        if (frame_generation_state ==
+            streamline::FrameGenerationState::error) {
+            if (!streamline_warning_logged) {
+                streamline_warning_logged = true;
+                log(message);
+            }
+        } else {
+            streamline_warning_logged = false;
+            frame_generation_active =
+                frame_generation_state ==
+                streamline::FrameGenerationState::active;
+        }
+        const uint32_t target_fps = frame_generation_active
+                                        ? config.frame_generation_on_fps
+                                        : config.frame_generation_off_fps;
+        if (!has_current_fps || target_fps != current_fps) {
+            if (set_fps_limit(config.limiter, target_fps, message,
+                              sizeof(message))) {
+                current_fps = target_fps;
+                has_current_fps = true;
+                limiter_warning_logged = false;
+                log(message);
+            } else if (!limiter_warning_logged) {
+                limiter_warning_logged = true;
+                log(message);
+            }
+        }
+        Sleep(CHECK_INTERVAL_MS);
+    }
 }
 
 } // namespace

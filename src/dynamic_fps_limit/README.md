@@ -5,11 +5,11 @@ A generic native `mod_loader` mod for games using NVIDIA Streamline DLSS-G.
 - NVIDIA frame generation disabled: configurable, 60 FPS by default
 - NVIDIA frame generation enabled: configurable, 120 FPS by default
 
-The mod hooks the game's `slDLSSGSetOptions` call and updates either the NVIDIA
-Reflex frame limit or the RTSS limit for the current game profile whenever
-DLSS-G is enabled or disabled. It is not tied to any particular game and should
-work with any title that loads `sl.interposer.dll` and exposes the standard
-Streamline APIs.
+The mod polls the game's DLSS-G runtime state every 300 ms and updates either
+the NVIDIA Reflex frame limit or the RTSS limit for the current game profile
+whenever the observed state changes. It is not tied to any particular game and
+should work with any title that loads `sl.interposer.dll` and exposes the
+standard Streamline APIs.
 
 Configure the mod in the `config.ini` next to `dynamic_fps_limit.dll`:
 

@@ -5,13 +5,20 @@
 
 namespace streamline {
 
-using FrameGenerationCallback = void (*)(bool active);
-// Installs the hooks and applies the initial Reflex fallback before returning.
-bool install_hooks(bool use_reflex, uint32_t initial_reflex_fps,
-                   FrameGenerationCallback callback, char* message,
-                   size_t message_size);
+enum class FrameGenerationState {
+    error,
+    inactive,
+    active,
+};
 
-// Must be called from the game thread.
+FrameGenerationState get_frame_generation_state(char* message,
+                                                 size_t message_size);
+
+// Installs the Reflex hook. Intercepted calls use initial_fps until polling
+// supplies the first runtime state.
+bool install_reflex_hook(uint32_t initial_fps, char* message,
+                         size_t message_size);
+
 bool set_reflex_fps_limit(uint32_t fps, char* message,
                           size_t message_size);
 

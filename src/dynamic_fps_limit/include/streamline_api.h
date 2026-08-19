@@ -3,8 +3,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
-// Minimal Streamline ABI used by this mod. Only fields accessed by the hooks
-// are declared for input structures owned by the game.
+// Minimal version-1 Streamline ABI used by this mod. Streamline structures are
+// append-only, so requesting v1 remains compatible with newer runtimes.
 namespace streamline {
 
 constexpr uint32_t FEATURE_DLSS_G = 1000;
@@ -12,6 +12,10 @@ constexpr uint32_t FEATURE_REFLEX = 3;
 constexpr uint32_t STRUCT_VERSION_1 = 1;
 
 enum class Result : int32_t {
+    ok = 0,
+};
+
+enum class DLSSGStatus : uint32_t {
     ok = 0,
 };
 
@@ -40,17 +44,20 @@ private:
     uint32_t value{};
 };
 
-enum class DLSSGMode : uint32_t {
-    off,
-    on,
-    automatic,
-    dynamic,
+struct DLSSGState : BaseStructure {
+    DLSSGState() {
+        struct_type = {0xcc8ac8e1, 0xa179, 0x44f5,
+                       {0x97, 0xfa, 0xe7, 0x41, 0x12, 0xf9, 0xbc, 0x61}};
+        struct_version = STRUCT_VERSION_1;
+    }
+
+    uint64_t estimated_vram_usage_in_bytes{};
+    DLSSGStatus status{};
+    uint32_t min_width_or_height{};
+    uint32_t num_frames_actually_presented{};
 };
 
-// Only the stable prefix read by the hook is declared here.
-struct DLSSGOptions : BaseStructure {
-    DLSSGMode mode{DLSSGMode::off};
-};
+struct DLSSGOptions;
 
 enum class ReflexMode : int32_t {
     off,
@@ -74,15 +81,17 @@ struct ReflexOptions : BaseStructure {
 
 using GetFeatureFunction =
     Result (*)(uint32_t feature, const char* function_name, void*& function);
-using DLSSGSetOptions = Result (*)(const ViewportHandle& viewport,
-                                   const DLSSGOptions& options);
+using DLSSGGetState = Result (*)(const ViewportHandle& viewport,
+                                 DLSSGState& state,
+                                 const DLSSGOptions* options);
 using ReflexSetOptions = Result (*)(const ReflexOptions& options);
 
 static_assert(sizeof(StructType) == 16);
 static_assert(sizeof(Result) == 4);
+static_assert(sizeof(DLSSGStatus) == 4);
 static_assert(sizeof(BaseStructure) == 32);
 static_assert(sizeof(ViewportHandle) == 40);
-static_assert(sizeof(DLSSGOptions) == 40);
+static_assert(sizeof(DLSSGState) == 56);
 static_assert(sizeof(ReflexOptions) == 48);
 
 } // namespace streamline
