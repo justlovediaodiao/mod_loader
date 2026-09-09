@@ -11,4 +11,4 @@ target_include_directories(steam_achievement PRIVATE include)
 target_link_libraries(steam_achievement PRIVATE kernel32)
 
 install(TARGETS steam_achievement RUNTIME DESTINATION .)
-install(FILES config.ini README.md DESTINATION .)
+install(FILES config.ini DESTINATION .)

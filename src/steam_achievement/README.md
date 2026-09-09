@@ -58,18 +58,28 @@ as UTF-16 LE with a BOM because it uses the Windows INI API. Logs use UTF-8.
 
 ## Behavior and compatibility
 
-A background worker waits up to 120 seconds for the game's loaded
-`steam_api64.dll` and achievement data. It uses `GetProcAddress` to resolve a
+A background worker waits up to 60 seconds for the game's loaded
+`steam_api64.dll`, then up to another 60 seconds for achievement data.
+It uses `GetProcAddress` to resolve a
 SteamUserStats v013/v012/v011 accessor and the achievement-related flat API
 exports. The game must initialize Steam itself. Older or customized DLLs that
 lack required exports are unsupported, and missing exports are logged. The mod
 does not load Steam DLLs itself or initialize or shut down Steam.
 
 For older SDKs, the mod requests data through `RequestCurrentStats` when needed
-and available. A successful read of a known achievement indicates that data is
+and available, retrying at most once every 10 seconds while data remains
+unavailable. Request acceptance does not confirm asynchronous completion.
+Request results and changes in the reported count are logged.
+A successful read of a known achievement indicates that data is
 ready; the game continues to process Steam callbacks. If Steam keeps reporting
 zero achievements, the mod logs `count=0` after the wait. This can mean that the
 game has no achievements or that its data is unavailable.
+
+If this happens for a game that has Steam achievements, check that Steam is
+logged in and launch the game through Steam. Verify that the game's App ID is
+correct. Include all `steam_achievement:` lines from `mod.log` when reporting
+the problem, especially the selected accessor and `RequestCurrentStats`
+results. Retries cannot fix an incorrect App ID or missing achievement data.
 
 Invalid IDs, already unlocked achievements, and API failures are logged per
 entry. After successful `SetAchievement` calls, the mod calls `StoreStats` once
