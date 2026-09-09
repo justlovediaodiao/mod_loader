@@ -1,0 +1,30 @@
+name: Build steam_achievement
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S src/steam_achievement -B build/steam_achievement -A x64
+
+      - name: Build
+        run: cmake --build build/steam_achievement --config Release --parallel
+
+      - name: Install distributable files
+        run: cmake --install build/steam_achievement --config Release --prefix dist/steam_achievement
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: steam_achievement-windows-x64
+          path: dist/steam_achievement
+          if-no-files-found: error

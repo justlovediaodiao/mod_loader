@@ -10,6 +10,7 @@ independently:
   Reflex FPS limit mod using that ABI.
 - [`unity_fps_limit`](src/unity_fps_limit): a Unity FPS/VSync mod using that
   ABI.
+- [`steam_achievement`](src/steam_achievement): a mod for unlocking Steam achievements.
 - [`steamclient_rdata_patch`](src/steamclient_rdata_patch): a targeted
   loader patch for a writable-section Steam client copy kept in the Steam
   installation directory.
