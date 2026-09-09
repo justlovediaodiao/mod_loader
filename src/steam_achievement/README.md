@@ -69,17 +69,10 @@ does not load Steam DLLs itself or initialize or shut down Steam.
 For older SDKs, the mod requests data through `RequestCurrentStats` when needed
 and available, retrying at most once every 10 seconds while data remains
 unavailable. Request acceptance does not confirm asynchronous completion.
-Request results and changes in the reported count are logged.
 A successful read of a known achievement indicates that data is
 ready; the game continues to process Steam callbacks. If Steam keeps reporting
 zero achievements, the mod logs `count=0` after the wait. This can mean that the
 game has no achievements or that its data is unavailable.
-
-If this happens for a game that has Steam achievements, check that Steam is
-logged in and launch the game through Steam. Verify that the game's App ID is
-correct. Include all `steam_achievement:` lines from `mod.log` when reporting
-the problem, especially the selected accessor and `RequestCurrentStats`
-results. Retries cannot fix an incorrect App ID or missing achievement data.
 
 Invalid IDs, already unlocked achievements, and API failures are logged per
 entry. After successful `SetAchievement` calls, the mod calls `StoreStats` once

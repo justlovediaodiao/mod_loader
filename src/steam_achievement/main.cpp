@@ -179,25 +179,15 @@ static void work() {
     }
     auto request = reinterpret_cast<bool (*)(void*)>(
         GetProcAddress(module, "SteamAPI_ISteamUserStats_RequestCurrentStats"));
-    if (!request) log("RequestCurrentStats export unavailable; waiting for Steam to load data automatically");
     // DLL loading must not consume the time allowed for asynchronous stats loading.
     const ULONGLONG stats_deadline = GetTickCount64() + 60000;
     ULONGLONG next_request = 0;
-    uint32_t request_attempts = 0;
-    uint32_t accepted_requests = 0;
-    bool observed_count = false;
-    uint32_t last_count = 0;
     while (GetTickCount64() < stats_deadline) {
         api.stats = accessor();
         if (api.stats) {
             // Older SDKs load stats asynchronously. Let the game pump its own
             // callbacks; a successful GetAchievement is the readiness probe.
             const uint32_t count = api.count(api.stats);
-            if (!observed_count || count != last_count) {
-                log("waiting for stats: achievement count=" + std::to_string(count));
-                observed_count = true;
-                last_count = count;
-            }
             if (count) {
                 const char* first = api.name(api.stats, 0);
                 bool unlocked = false;
@@ -210,12 +200,7 @@ static void work() {
             // must not prevent another request for the rest of this launch.
             const ULONGLONG now = GetTickCount64();
             if (request && now >= next_request) {
-                ++request_attempts;
-                const bool accepted = request(api.stats);
-                if (accepted) ++accepted_requests;
-                log("RequestCurrentStats attempt=" + std::to_string(request_attempts) +
-                    (accepted ? " accepted; waiting for data"
-                              : " rejected; check Steam login and game initialization"));
+                request(api.stats);
                 next_request = now + 10000;
             }
         }
@@ -225,9 +210,6 @@ static void work() {
         log("no achievements reported (count=0); the game may have none or Steam data may be unavailable");
     else
         log("timed out waiting for initialized Steam achievement data");
-    log("stats request attempts=" + std::to_string(request_attempts) +
-        " accepted=" + std::to_string(accepted_requests));
-    log("check that Steam is logged in, launch the game through Steam, and verify the game's App ID has achievements; the game must process Steam callbacks");
     if (!ids.empty()) log("configured achievements were not unlocked");
 }
 
