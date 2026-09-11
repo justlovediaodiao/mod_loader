@@ -11,26 +11,21 @@ static wchar_t g_own_dir[MAX_PATH];
 extern "C" void load_functions(HMODULE dll);
 
 static CRITICAL_SECTION g_log_lock;
+static HANDLE g_log_file = INVALID_HANDLE_VALUE;
 
 static void MOD_LOADER_CALL mod_log(const char* text) {
-    if (!text) return;
+    if (!text || g_log_file == INVALID_HANDLE_VALUE) return;
     EnterCriticalSection(&g_log_lock);
-    wchar_t path[MAX_PATH];
-    wsprintfW(path, L"%s\\mod.log", g_own_dir);
-    HANDLE file = CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr,
-                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) { LeaveCriticalSection(&g_log_lock); return; }
     SYSTEMTIME now{};
     GetLocalTime(&now);
     char prefix[32];
     int prefix_length = wsprintfA(prefix, "[%02u:%02u:%02u] ", now.wHour,
                                   now.wMinute, now.wSecond);
     DWORD written;
-    WriteFile(file, prefix, static_cast<DWORD>(prefix_length), &written, nullptr);
-    WriteFile(file, text, static_cast<DWORD>(lstrlenA(text)), &written, nullptr);
+    WriteFile(g_log_file, prefix, static_cast<DWORD>(prefix_length), &written, nullptr);
+    WriteFile(g_log_file, text, static_cast<DWORD>(lstrlenA(text)), &written, nullptr);
     static const char newline[] = "\r\n";
-    WriteFile(file, newline, sizeof(newline) - 1, &written, nullptr);
-    CloseHandle(file);
+    WriteFile(g_log_file, newline, sizeof(newline) - 1, &written, nullptr);
     LeaveCriticalSection(&g_log_lock);
 }
 
@@ -142,6 +137,11 @@ static bool has_on_mod_load_export(const wchar_t* path) {
 }
 
 static DWORD WINAPI load_mods(void*) {
+    wchar_t log_path[MAX_PATH];
+    wsprintfW(log_path, L"%s\\mod.log", g_own_dir);
+    g_log_file = CreateFileW(log_path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                             CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+
     wchar_t pattern[MAX_PATH];
     wsprintfW(pattern, L"%s\\mods\\*.dll", g_own_dir);
     WIN32_FIND_DATAW entry{};
@@ -193,6 +193,7 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE self, DWORD reason, LPVOID) {
         HANDLE thread = CreateThread(nullptr, 0, load_mods, nullptr, 0, nullptr);
         if (thread) CloseHandle(thread);
     } else if (reason == DLL_PROCESS_DETACH) {
+        if (g_log_file != INVALID_HANDLE_VALUE) CloseHandle(g_log_file);
         DeleteCriticalSection(&g_log_lock);
     }
     return TRUE;
