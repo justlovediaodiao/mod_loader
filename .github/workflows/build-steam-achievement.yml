@@ -11,7 +11,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configure
         run: cmake -S src/steam_achievement -B build/steam_achievement -A x64
@@ -23,7 +23,7 @@ jobs:
         run: cmake --install build/steam_achievement --config Release --prefix dist/steam_achievement
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: steam_achievement-windows-x64
           path: dist/steam_achievement
