@@ -182,6 +182,11 @@ bool install_reflex_hook(uint32_t initial_fps, char* message,
                                hook_target, message, message_size)) {
         return false;
     }
+
+    // The function can become available while the game is still initializing
+    // Reflex and DLSS-G. Delay hook installation to avoid that startup window.
+    Sleep(3000);
+
     MH_STATUS status = MH_Initialize();
     if (status != MH_OK && status != MH_ERROR_ALREADY_INITIALIZED) {
         format_hook_error(message, message_size, "MH_Initialize", status);

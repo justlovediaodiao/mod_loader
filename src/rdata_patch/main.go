@@ -96,7 +96,6 @@ func makeRdataWritable(inputPath, outputPath string) error {
 
 		nameBytes := modified[int(offset) : int(offset)+8]
 
-		// PE 节名字段固定为 8 字节，未使用部分通常以 0 填充。
 		name := strings.TrimRight(string(nameBytes), "\x00")
 
 		if strings.HasPrefix(name, ".rdata") {
@@ -146,4 +145,3 @@ func makeRdataWritable(inputPath, outputPath string) error {
 
 	return nil
 }
-
